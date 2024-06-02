@@ -1,8 +1,15 @@
-#include <vector>
+#include <Arduino.h>
+#include <cmath> // Include cmath for pow()
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
+
+// Mutex variable declaration
+// portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+SemaphoreHandle_t io_mutex;
 
 namespace ENV {
     const int WL_PIN = 18;
-    const int BIT0_PIN = 33;
 };
 
 class half_byte {
@@ -11,7 +18,7 @@ public:
 
     half_byte(int num) {
         if (num >= pow(2, 4)) {
-            this->num = pow(2, 4);
+            this->num = pow(2, 4) - 1; // Corrected value to be within 4 bits
         }
         else {
             this->num = num;
@@ -20,72 +27,46 @@ public:
 
     void set(int num) {
         if (num >= pow(2, 4)) {
-            this->num = pow(2, 4);
+            this->num = pow(2, 4) - 1; // Corrected value to be within 4 bits
         }
         else {
             this->num = num;
         }
     }
-
-    static half_byte vec2int(std::vector<bool>& v) {
-        int t = 0;
-        for (int i = 0; i < 4; i++) {
-            t += v[i] * pow(2, i);
-        }
-        return half_byte(t);
-    }
-};
-
-class Bit {
-    private:
-        const int pin;
-    public:
-        Bit(int pin) : pin(pin) {}
-
-        bool read() {
-            pinMode(pin, INPUT);
-            digitalWrite(ENV::WL_PIN, HIGH);
-            bool data = digitalRead(pin);
-            digitalWrite(ENV::WL_PIN, LOW);
-            return data;
-        }
-
-        template<bool isTask>
-        bool write(bool data) {
-            pinMode(ENV::WL_PIN, OUTPUT); // WL_PIN의 핀 모드 설정 추가
-            pinMode(pin, OUTPUT);
-            digitalWrite(pin, data);
-            digitalWrite(ENV::WL_PIN, HIGH);
-            if (isTask) {
-                vTaskDelay(pdMS_TO_TICKS(1000)); // FreeRTOS의 딜레이 함수 사용
-            }
-            else {
-                delay(1000);
-            }
-            digitalWrite(ENV::WL_PIN, LOW);
-            digitalWrite(pin, LOW);
-        }
 };
 
 class Byte {
-private:
-    std::vector<Bit> V;
-public:
-    Byte(std::vector<int> pins) {
-        for (int pin : pins) {
-            V.push_back(Bit(pin));
+    private:
+        int* V;
+    public:
+        Byte(int p1, int p2, int p3, int p4) {
+            V = new int[4]{p1, p2, p3, p4};
         }
-    }
 
-    half_byte read() {
-        std::vector<bool> T;
-        for (Bit B : V) {
-            T.push_back(B.read());
+        half_byte read() {
+            for (int i = 0; i < 4; i++) {
+                pinMode(V[i], INPUT);
+            }
+            digitalWrite(ENV::WL_PIN, HIGH);
+            int t = 0;
+            for (int i = 0; i < 4; i++) {
+                t += digitalRead(V[i]) * (int)pow(2, i);
+            }
+            return half_byte(t);
         }
-        return half_byte::vec2int(T);
-    }
 
-    void write(half_byte& hb) {
-
-    }
+        void write(bool isTask, half_byte& hb) {
+            for (int i = 0; i < 4; i++) {
+                pinMode(V[i], OUTPUT); 
+            }
+            digitalWrite(ENV::WL_PIN, LOW);
+            
+            for (int i = 0; i < 4; i++) {
+                digitalWrite(V[i], (hb.num & (int)pow(2, i)) >> i);
+            }
+            
+            digitalWrite(ENV::WL_PIN, HIGH);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            digitalWrite(ENV::WL_PIN, LOW);
+        }
 };
